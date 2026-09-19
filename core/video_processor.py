@@ -56,6 +56,16 @@ def get_binary_paths():
         if found_ffmpeg and found_ffprobe:
             return found_ffmpeg, found_ffprobe
 
+    # Check imageio_ffmpeg for bundled static binary (e.g. on Linux, Vercel, Docker)
+    if not found_ffmpeg:
+        try:
+            import imageio_ffmpeg
+            imgio_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            if imgio_exe and os.path.exists(imgio_exe):
+                found_ffmpeg = imgio_exe
+        except Exception:
+            pass
+
     return found_ffmpeg or "ffmpeg", found_ffprobe or "ffprobe"
 
 
@@ -537,6 +547,78 @@ class VideoProcessor:
         if progress_callback:
             progress_callback(100.0, "Complete!")
 
+    def process_video_pure_cv2(
+        self,
+        video_path: str,
+        boxes: list,
+        method: str,
+        feather: int,
+        output_path: str,
+        progress_callback: Optional[Callable[[float, str], None]] = None
+    ):
+        """
+        Pure OpenCV frame-by-frame video watermark removal without external ffmpeg binary.
+        Provides 100% reliable execution in serverless/cloud environments where ffmpeg is absent.
+        """
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise RuntimeError(f"Could not open video file with OpenCV: {video_path}")
+
+        W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = float(cap.get(cv2.CAP_PROP_FPS)) or 25.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        writer = cv2.VideoWriter(output_path, fourcc, fps, (W, H))
+
+        parsed_boxes = []
+        for b in boxes:
+            bx = max(0, min(int(b.get("x", 0)), W - 1))
+            by = max(0, min(int(b.get("y", 0)), H - 1))
+            bw = max(1, min(max(1, int(b.get("w", 10))), W - bx))
+            bh = max(1, min(max(1, int(b.get("h", 10))), H - by))
+            st = float(b["start_time"]) if b.get("start_time") is not None else None
+            et = float(b["end_time"]) if b.get("end_time") is not None else None
+            parsed_boxes.append({"x": bx, "y": by, "w": bw, "h": bh, "st": st, "et": et})
+
+        frame_count = 0
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                cur_time = frame_count / fps
+                active = []
+                for b in parsed_boxes:
+                    if b["st"] is not None and b["et"] is not None and b["et"] > b["st"]:
+                        if b["st"] <= cur_time <= b["et"]:
+                            active.append(b)
+                    else:
+                        active.append(b)
+
+                for b in active:
+                    frame = self.apply_watermark_removal_to_image(
+                        frame, b["x"], b["y"], b["w"], b["h"],
+                        method=method if method in ("telea", "ns", "blur") else "telea",
+                        feather=feather
+                    )
+
+                writer.write(frame)
+                frame_count += 1
+
+                if progress_callback and frame_count % 10 == 0:
+                    pct = min(99.0, max(0.0, (frame_count / total_frames) * 100.0))
+                    progress_callback(pct, f"Processing frames... {pct:.1f}%")
+        finally:
+            cap.release()
+            writer.release()
+
+        if progress_callback:
+            progress_callback(100.0, "Complete!")
+
     def remove_watermark(
         self,
         video_path: str,
@@ -551,14 +633,17 @@ class VideoProcessor:
         boxes: Optional[list] = None
     ):
         """
-        Main entry point for watermark removal.
-        Accepts single box coordinates or list of multiple boxes.
+        Main entry point for watermark removal with 3-tier fallback architecture:
+        1. Native FFmpeg Delogo (fastest, lossless)
+        2. Streaming FFmpeg Pipe + OpenCV inpaint (custom algorithms + audio passthrough)
+        3. Pure OpenCV Video Engine (zero binary dependencies, runs anywhere)
         """
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
         if not boxes:
             boxes = [{"x": x, "y": y, "w": w, "h": h, "start_time": None, "end_time": None}]
 
+        # Tier 1: FFmpeg Delogo
         if method == "delogo":
             try:
                 self.process_video_ffmpeg_delogo(
@@ -568,26 +653,36 @@ class VideoProcessor:
                     output_path=output_path,
                     progress_callback=progress_callback
                 )
+                return output_path
             except Exception as e:
-                print(f"[Auto-Fallback] FFmpeg delogo encountered error: {e}. Switching to AI Inpainting (Telea)...")
-                if progress_callback:
-                    progress_callback(10.0, "Switching to AI inpainting engine...")
-                self.process_video_cv2_pipe(
-                    video_path=video_path,
-                    boxes=boxes,
-                    method="telea",
-                    feather=feather,
-                    output_path=output_path,
-                    progress_callback=progress_callback
-                )
-        else:
+                print(f"[Tier 1 Fallback] FFmpeg delogo unavailable or failed: {e}. Trying FFmpeg AI pipe...")
+
+        # Tier 2: FFmpeg Pipe with OpenCV inpainting & audio copy
+        try:
+            if progress_callback:
+                progress_callback(12.0, "Processing with AI inpainting...")
             self.process_video_cv2_pipe(
                 video_path=video_path,
                 boxes=boxes,
-                method=method,
+                method=method if method in ("telea", "ns", "blur") else "telea",
                 feather=feather,
                 output_path=output_path,
                 progress_callback=progress_callback
             )
+            return output_path
+        except Exception as e:
+            print(f"[Tier 2 Fallback] FFmpeg pipe unavailable or failed: {e}. Falling back to pure OpenCV engine...")
+
+        # Tier 3: Pure OpenCV processing (Zero external binaries required)
+        if progress_callback:
+            progress_callback(20.0, "Processing with pure OpenCV engine...")
+        self.process_video_pure_cv2(
+            video_path=video_path,
+            boxes=boxes,
+            method=method if method in ("telea", "ns", "blur") else "telea",
+            feather=feather,
+            output_path=output_path,
+            progress_callback=progress_callback
+        )
         return output_path
 
