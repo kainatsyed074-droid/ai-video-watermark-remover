@@ -166,12 +166,35 @@ document.addEventListener("DOMContentLoaded", () => {
     const formData = new FormData();
     formData.append("video", file);
 
+    // Check file size warning for Vercel serverless environment
+    if (window.location.hostname.includes("vercel.app") && file.size > 4.5 * 1024 * 1024) {
+      alert(
+        `Vercel Serverless File Limit:\n\n` +
+        `Your video is ${(file.size / (1024 * 1024)).toFixed(1)} MB, but Vercel free cloud hosting only permits uploads up to 4.5 MB.\n\n` +
+        `For full-length, full-size 1080p & 4K HD videos with zero limits, please run the tool locally by double-clicking 'start.bat' on your computer.`
+      );
+      dropContent.style.display = "block";
+      uploadSpinner.style.display = "none";
+      return;
+    }
+
     try {
       const response = await fetch("/api/upload", {
         method: "POST",
         body: formData
       });
-      const data = await response.json();
+
+      let data;
+      const responseText = await response.text();
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseErr) {
+        if (response.status === 413) {
+          throw new Error("File size exceeds server upload limit (max 4.5MB on Vercel). Run locally with start.bat for unlimited file sizes.");
+        }
+        const cleanMsg = responseText.replace(/<[^>]*>?/gm, " ").replace(/\s+/g, " ").trim();
+        throw new Error(`Server returned status ${response.status}: ${cleanMsg.substring(0, 120) || "Invalid response"}`);
+      }
 
       if (!response.ok || data.error) {
         throw new Error(data.error || "Failed to upload video");

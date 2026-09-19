@@ -10,18 +10,50 @@ from werkzeug.utils import secure_filename
 from core.video_processor import VideoProcessor
 from core.presets import PRESETS, get_preset_coordinates
 
+import tempfile
+
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024  # Up to 1GB video upload support
 
-BASE_DIR = Path(__file__).resolve().parent
-UPLOAD_DIR = BASE_DIR / "uploads"
-PREVIEW_DIR = BASE_DIR / "previews"
-OUTPUT_DIR = BASE_DIR / "outputs"
+
+def get_data_dir():
+    # If on serverless platforms (Vercel, AWS Lambda) or read-only filesystem, use /tmp
+    if os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+        d = Path(tempfile.gettempdir()) / "video_watermark_remover"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    base_dir = Path(__file__).resolve().parent
+    try:
+        test_file = base_dir / ".write_test"
+        test_file.touch()
+        test_file.unlink()
+        return base_dir
+    except OSError:
+        d = Path(tempfile.gettempdir()) / "video_watermark_remover"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+
+DATA_DIR = get_data_dir()
+UPLOAD_DIR = DATA_DIR / "uploads"
+PREVIEW_DIR = DATA_DIR / "previews"
+OUTPUT_DIR = DATA_DIR / "outputs"
 
 for directory in (UPLOAD_DIR, PREVIEW_DIR, OUTPUT_DIR):
     directory.mkdir(parents=True, exist_ok=True)
 
 processor = VideoProcessor()
+
+
+@app.errorhandler(500)
+def handle_500_error(e):
+    return jsonify({"error": f"Internal server error: {getattr(e, 'description', str(e))}"}), 500
+
+
+@app.errorhandler(413)
+def handle_413_error(e):
+    return jsonify({"error": "File size exceeds server upload limit."}), 413
 
 # In-memory store for tasks and videos
 TASKS = {}
@@ -53,65 +85,70 @@ def get_presets():
 
 @app.route("/api/upload", methods=["POST"])
 def upload_video():
-    if "video" not in request.files:
-        return jsonify({"error": "No video file provided"}), 400
-
-    file = request.files["video"]
-    if file.filename == "":
-        return jsonify({"error": "No file selected"}), 400
-
-    video_id = str(uuid.uuid4())[:8]
-    ext = Path(file.filename).suffix.lower() or ".mp4"
-    saved_filename = f"{video_id}_{secure_filename(file.filename)}"
-    video_path = str(UPLOAD_DIR / saved_filename)
-    file.save(video_path)
-
     try:
-        info = processor.get_video_info(video_path)
-    except Exception as e:
-        return jsonify({"error": f"Failed to analyze video: {str(e)}"}), 500
+        if "video" not in request.files:
+            return jsonify({"error": "No video file provided"}), 400
 
-    # Extract first frame at 0.5s or 0s
-    first_frame_path = str(PREVIEW_DIR / f"{video_id}_frame_0.jpg")
-    try:
-        processor.extract_frame(video_path, min(0.5, info["duration"] / 2 if info["duration"] > 0 else 0), first_frame_path)
-    except Exception as e:
-        pass
+        file = request.files["video"]
+        if file.filename == "":
+            return jsonify({"error": "No file selected"}), 400
 
-    # Generate web-friendly faststart MP4 preview to guarantee smooth playback and seeking in all browsers
-    web_filename = f"web_{video_id}.mp4"
-    web_path = str(UPLOAD_DIR / web_filename)
-    faststart_cmd = [
-        processor.ffmpeg_path, "-y",
-        "-i", video_path,
-        "-c:v", "libx264", "-pix_fmt", "yuv420p",
-        "-preset", "ultrafast",
-        "-movflags", "+faststart",
-        "-c:a", "aac",
-        web_path
-    ]
-    try:
-        subprocess.run(faststart_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        display_video_url = f"/uploads/{web_filename}"
-    except Exception:
-        display_video_url = f"/uploads/{saved_filename}"
+        video_id = str(uuid.uuid4())[:8]
+        saved_filename = f"{video_id}_{secure_filename(file.filename)}"
+        video_path = str(UPLOAD_DIR / saved_filename)
+        file.save(video_path)
 
-    VIDEOS[video_id] = {
-        "id": video_id,
-        "original_filename": file.filename,
-        "path": video_path,
-        "info": info,
-        "first_frame": f"/previews/{os.path.basename(first_frame_path)}"
-    }
+        try:
+            info = processor.get_video_info(video_path)
+        except Exception as e:
+            return jsonify({"error": f"Failed to analyze video: {str(e)}"}), 400
 
-    return jsonify({
-        "status": "success",
-        "video_id": video_id,
-        "filename": file.filename,
-        "info": info,
-        "preview_frame": f"/previews/{os.path.basename(first_frame_path)}",
-        "video_url": display_video_url
-    })
+        # Extract first frame at 0.5s or 0s
+        first_frame_path = str(PREVIEW_DIR / f"{video_id}_frame_0.jpg")
+        try:
+            processor.extract_frame(video_path, min(0.5, info["duration"] / 2 if info["duration"] > 0 else 0), first_frame_path)
+        except Exception:
+            pass
+
+        # Generate web-friendly faststart MP4 preview to guarantee smooth playback and seeking in all browsers
+        web_filename = f"web_{video_id}.mp4"
+        web_path = str(UPLOAD_DIR / web_filename)
+        faststart_cmd = [
+            processor.ffmpeg_path, "-y",
+            "-i", video_path,
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-preset", "ultrafast",
+            "-movflags", "+faststart",
+            "-c:a", "aac",
+            web_path
+        ]
+        try:
+            subprocess.run(faststart_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            display_video_url = f"/uploads/{web_filename}"
+        except Exception:
+            display_video_url = f"/uploads/{saved_filename}"
+
+        has_frame = os.path.exists(first_frame_path)
+        frame_url = f"/previews/{os.path.basename(first_frame_path)}" if has_frame else ""
+
+        VIDEOS[video_id] = {
+            "id": video_id,
+            "original_filename": file.filename,
+            "path": video_path,
+            "info": info,
+            "first_frame": frame_url
+        }
+
+        return jsonify({
+            "status": "success",
+            "video_id": video_id,
+            "filename": file.filename,
+            "info": info,
+            "preview_frame": frame_url,
+            "video_url": display_video_url
+        })
+    except Exception as exc:
+        return jsonify({"error": f"Upload failed: {str(exc)}"}), 500
 
 
 
