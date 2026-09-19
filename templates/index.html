@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Video Watermark Remover | Gemini, Dola AI & Lossless HD</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo-group">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 10l5-5m0 0l-5-5m5 5H9a4 4 0 00-4 4v2m0 4v6m0 0l5-5m-5 5l-5-5"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+        </div>
+        <div>
+          <h1>AI Video Watermark Remover</h1>
+          <p class="subtitle">Remove watermarks from Gemini, Dola AI, Runway & any video in 100% original HD resolution</p>
+        </div>
+      </div>
+      <div class="badge-group">
+        <span class="badge badge-success">✓ Lossless HD</span>
+        <span class="badge badge-info">✓ Audio Preserved</span>
+        <span class="badge badge-primary">✓ AI Inpaint</span>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Step 1: Upload Card -->
+      <section class="card upload-card" id="uploadSection">
+        <div class="dropzone" id="dropzone">
+          <input type="file" id="videoInput" accept="video/mp4,video/quicktime,video/x-matroska,video/webm" hidden>
+          <div class="dropzone-content">
+            <div class="upload-icon-circle">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="upload-icon">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            <h3>Drag & Drop your AI Video here</h3>
+            <p>Supports MP4, MOV, MKV, WebM (1080p, 4K, 720p HD)</p>
+            <button class="btn btn-primary" onclick="document.getElementById('videoInput').click()">
+              Browse Video File
+            </button>
+          </div>
+          <div class="upload-spinner" id="uploadSpinner" style="display: none;">
+            <div class="spinner"></div>
+            <p>Analyzing video properties & preparing editor...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 2: Editor (hidden until video is uploaded) -->
+      <section class="editor-section" id="editorSection" style="display: none;">
+        <!-- Top Video Metadata Strip -->
+        <div class="video-meta-strip">
+          <div class="meta-item">
+            <span class="meta-label">File:</span>
+            <strong id="metaFilename">-</strong>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">Resolution:</span>
+            <strong id="metaResolution" class="highlight-pill">-</strong>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">Frame Rate:</span>
+            <strong id="metaFps">-</strong>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">Duration:</span>
+            <strong id="metaDuration">-</strong>
+          </div>
+          <button class="btn btn-outline-sm" id="btnChangeVideo">Change Video</button>
+        </div>
+
+        <div class="editor-grid">
+          <!-- Left: Video Canvas Viewport -->
+          <div class="viewport-column">
+            <div class="canvas-wrapper" id="canvasWrapper">
+              <video id="sourceVideo" preload="auto" playsinline muted></video>
+              <canvas id="overlayCanvas"></canvas>
+              <div class="canvas-hint">Click & drag on the video to select the watermark area</div>
+            </div>
+
+            <!-- Video Timeline & Playback Bar -->
+            <div class="timeline-bar">
+              <button class="btn-icon" id="btnPlayPause" title="Play/Pause">
+                <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <svg id="pauseIcon" viewBox="0 0 24 24" fill="currentColor" style="display: none;"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+              </button>
+              <button class="btn-icon" id="btnMuteUnmute" title="Mute/Unmute audio">
+                <svg id="unmuteIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: none;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+                <svg id="muteIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+              </button>
+              <span id="currentTimeDisplay" class="time-code">00:00</span>
+              <input type="range" id="timeScrubber" min="0" max="100" value="0" step="0.1" class="scrubber">
+              <span id="totalTimeDisplay" class="time-code">00:00</span>
+            </div>
+
+
+            <!-- Live Before/After Comparison Card -->
+            <div class="preview-box" id="previewBox" style="display: none;">
+              <div class="preview-box-header">
+                <h4>Frame Preview (Before vs After)</h4>
+                <button class="btn-close-preview" id="btnClosePreview">&times;</button>
+              </div>
+              <div class="preview-comparison">
+                <div class="preview-col">
+                  <div class="preview-tag">Original (With Watermark)</div>
+                  <div class="preview-img-container">
+                    <img id="previewOrigImg" alt="Original Frame">
+                  </div>
+                </div>
+                <div class="preview-col">
+                  <div class="preview-tag clean-tag">Cleaned (Watermark Removed)</div>
+                  <div class="preview-img-container">
+                    <img id="previewCleanImg" alt="Cleaned Frame">
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Controls & Parameters Panel -->
+          <div class="controls-column">
+            <!-- Multi-Watermark Zones List -->
+            <div class="card control-group">
+              <div class="control-header-flex">
+                <label class="control-heading mb-0">
+                  <span class="step-num">1</span>
+                  <span>Watermark Zones</span>
+                  <span id="boxCountBadge" class="badge badge-primary ml-2">1 Area</span>
+                </label>
+                <button class="btn btn-outline-sm btn-accent" id="btnAddBox" title="Add another watermark zone">
+                  ➕ Add Area
+                </button>
+              </div>
+              <p class="help-text">Select multiple watermarks in different positions or times in the video.</p>
+              
+              <!-- Dynamic Watermark List -->
+              <div id="boxListContainer" class="box-list-container">
+                <!-- Dynamically populated cards for each box -->
+              </div>
+            </div>
+
+            <!-- Active Watermark Settings & Fine Tuning -->
+            <div class="card control-group" id="activeBoxSettings">
+              <label class="control-heading">
+                <span class="step-num">2</span>
+                <span id="activeBoxTitle">Watermark 1 Settings</span>
+              </label>
+
+              <!-- Preset Select for Active Box -->
+              <div class="field-row">
+                <span class="field-label">Preset Location:</span>
+                <select id="presetSelect" class="form-select">
+                  <option value="custom">🎯 Custom (Drag on Video)</option>
+                  <option value="gemini_bottom_right">✨ Gemini / Veo (Bottom-Right)</option>
+                  <option value="dola_bottom_right">⚡ Dola AI (Bottom-Right)</option>
+                  <option value="bottom_right">📍 Bottom-Right Corner</option>
+                  <option value="bottom_left">📍 Bottom-Left Corner</option>
+                  <option value="top_right">📍 Top-Right Corner</option>
+                  <option value="top_left">📍 Top-Left Corner</option>
+                  <option value="bottom_center">📍 Bottom-Center</option>
+                </select>
+              </div>
+
+              <!-- Timeline Range Controls -->
+              <div class="timeline-range-box">
+                <div class="range-toggle-row">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="checkFullVideo" checked>
+                    <span>Appear throughout entire video</span>
+                  </label>
+                </div>
+                <div id="timeRangeInputs" class="time-range-grid" style="display: none;">
+                  <div class="time-field">
+                    <span>Starts at (sec):</span>
+                    <div class="input-with-btn">
+                      <input type="number" id="inputStartTime" class="form-input" min="0" step="0.1" value="0.0">
+                      <button class="btn-time-sync" id="btnSetStartNow" title="Use current video position">⏱️ Now</button>
+                    </div>
+                  </div>
+                  <div class="time-field">
+                    <span>Ends at (sec):</span>
+                    <div class="input-with-btn">
+                      <input type="number" id="inputEndTime" class="form-input" min="0" step="0.1" value="5.0">
+                      <button class="btn-time-sync" id="btnSetEndNow" title="Use current video position">⏱️ Now</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Coordinates Grid -->
+              <div class="coord-grid">
+                <div class="coord-field">
+                  <span>X Position:</span>
+                  <input type="number" id="inputX" class="form-input" min="0">
+                </div>
+                <div class="coord-field">
+                  <span>Y Position:</span>
+                  <input type="number" id="inputY" class="form-input" min="0">
+                </div>
+                <div class="coord-field">
+                  <span>Width:</span>
+                  <input type="number" id="inputW" class="form-input" min="10">
+                </div>
+                <div class="coord-field">
+                  <span>Height:</span>
+                  <input type="number" id="inputH" class="form-input" min="10">
+                </div>
+              </div>
+
+              <div class="slider-field">
+                <div class="slider-label">
+                  <span>Edge Smoothness / Feather:</span>
+                  <strong id="featherValue">5 px</strong>
+                </div>
+                <input type="range" id="featherSlider" min="0" max="15" value="5" class="range-slider">
+              </div>
+
+              <div class="delete-box-row">
+                <button class="btn-delete-box" id="btnDeleteActiveBox">
+                  🗑️ Remove This Watermark Area
+                </button>
+              </div>
+            </div>
+
+
+            <!-- Algorithm Selection -->
+            <div class="card control-group">
+              <label class="control-heading">
+                <span class="step-num">3</span>
+                <span>Removal Method</span>
+              </label>
+              <div class="radio-cards">
+                <label class="radio-card">
+                  <input type="radio" name="algorithm" value="delogo" checked>
+                  <div class="radio-card-body">
+                    <strong>FFmpeg Delogo (Fastest & Crisp)</strong>
+                    <p>Interpolates from surrounding edge pixels. High speed with lossless quality.</p>
+                  </div>
+                </label>
+                <label class="radio-card">
+                  <input type="radio" name="algorithm" value="telea">
+                  <div class="radio-card-body">
+                    <strong>AI Inpainting (Telea)</strong>
+                    <p>Fast marching reconstruction. Best for natural textures and backgrounds.</p>
+                  </div>
+                </label>
+                <label class="radio-card">
+                  <input type="radio" name="algorithm" value="ns">
+                  <div class="radio-card-body">
+                    <strong>AI Inpainting (Navier-Stokes)</strong>
+                    <p>Fluid-based boundary propagation. Smooth fills for solid colors and gradients.</p>
+                  </div>
+                </label>
+                <label class="radio-card">
+                  <input type="radio" name="algorithm" value="blur">
+                  <div class="radio-card-body">
+                    <strong>Feathered Gaussian Blur</strong>
+                    <p>Soft seamless blend without sharp box edges. Great for complex motion.</p>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="action-buttons">
+              <button class="btn btn-secondary w-100" id="btnPreviewFrame">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-svg"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                Preview Current Frame
+              </button>
+              <button class="btn btn-primary-lg w-100" id="btnProcessVideo">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-svg"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                Remove Watermark & Export HD Video
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 3: Processing & Results Modal / Card -->
+      <section class="card progress-card" id="progressSection" style="display: none;">
+        <div class="progress-box">
+          <h3 id="progressTitle">Removing Watermark...</h3>
+          <p id="progressMessage" class="progress-msg">Encoding in original HD resolution...</p>
+          
+          <div class="progress-bar-container">
+            <div class="progress-bar-fill" id="progressBarFill" style="width: 0%;"></div>
+          </div>
+          <div class="progress-footer">
+            <span id="progressPercentage">0%</span>
+            <span id="progressEta">Please wait...</span>
+          </div>
+
+          <!-- Video Result and Download Area (shows when done) -->
+          <div class="result-area" id="resultArea" style="display: none;">
+            <div class="success-banner">
+              🎉 Watermark successfully removed in full HD!
+            </div>
+            <div class="result-video-wrapper">
+              <video id="resultVideo" controls playsinline></video>
+            </div>
+            <div class="result-actions">
+              <a id="btnDownload" class="btn btn-success-lg" href="#" download>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-svg"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Download Clean HD Video
+              </a>
+              <button class="btn btn-outline" id="btnResetAll">Process Another Video</button>
+            </div>
+          </div>
+
+          <!-- Error Fallback Action Area -->
+          <div class="error-area" id="errorArea" style="display: none; margin-top: 24px; text-align: center;">
+            <button class="btn btn-primary" id="btnBackToEditor">
+              ← Back to Editor & Adjust Selection
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <p>AI Video Watermark Remover • Preserves 100% Original Resolution & Audio • Offline & Local</p>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.class
+*.so
+.Python
+env/
+venv/
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Large Binaries (>100MB exceeds GitHub limits)
+bin/*.exe
+bin/*.zip
+
+# User uploads, outputs, and frame previews
+uploads/*
+!uploads/.gitkeep
+outputs/*
+!outputs/.gitkeep
+previews/*
+!previews/.gitkeep
+
+# Operating System & IDE
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
