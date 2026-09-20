@@ -297,7 +297,8 @@ def download_result(task_id):
         output_path,
         as_attachment=True,
         download_name=download_filename,
-        mimetype="video/mp4"
+        mimetype="video/mp4",
+        conditional=True
     )
 
 

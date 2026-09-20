@@ -191,12 +191,12 @@ class VideoProcessor:
         feather: int = 4
     ) -> np.ndarray:
         """
-        Applies watermark removal on a single BGR image.
+        Applies watermark removal on a single BGR image using ultra-fast ROI patch inpainting.
         Methods:
         - 'telea': Fast marching method (cv2.INPAINT_TELEA) with smooth blending
         - 'ns': Navier-Stokes based inpainting (cv2.INPAINT_NS)
         - 'blur': Feathered edge Gaussian blur (smooth region blend)
-        - 'delogo_patch': Interpolation matching surrounding gradient
+        - 'delogo': Delogo edge-interpolation style inpainting
         """
         H, W = img.shape[:2]
         
@@ -208,41 +208,51 @@ class VideoProcessor:
 
         result = img.copy()
 
+        # ROI sub-patch bounds around the watermark box with safety margin
+        pad = max(16, feather * 2 + 8)
+        x0 = max(0, x - pad)
+        y0 = max(0, y - pad)
+        x1 = min(W, x + w + pad)
+        y1 = min(H, y + h + pad)
+
+        pw = x1 - x0
+        ph = y1 - y0
+        if pw <= 0 or ph <= 0:
+            return result
+
+        sub_patch = result[y0:y1, x0:x1]
+        bx0 = x - x0
+        by0 = y - y0
+
         if method in ("telea", "ns"):
             flags = cv2.INPAINT_TELEA if method == "telea" else cv2.INPAINT_NS
             
-            # Create a clean mask with slight dilation for edge completeness
-            mask = np.zeros((H, W), dtype=np.uint8)
-            mask[y:y+h, x:x+w] = 255
+            # Local mask for the sub-patch only (orders of magnitude faster than full-frame)
+            local_mask = np.zeros((ph, pw), dtype=np.uint8)
+            local_mask[by0:by0+h, bx0:bx0+w] = 255
             
-            # Inpainting radius
             radius = max(3, min(feather, 7))
-            inpainted = cv2.inpaint(result, mask, inpaintRadius=radius, flags=flags)
+            inpainted_patch = cv2.inpaint(sub_patch, local_mask, inpaintRadius=radius, flags=flags)
             
-            # Feathered alpha blend around the border of the mask to prevent seams
+            # Feathered alpha blend around the border of the sub-patch
             if feather > 0:
-                # Create a soft feather mask
-                soft_mask = np.zeros((H, W), dtype=np.float32)
-                soft_mask[y:y+h, x:x+w] = 1.0
+                soft_mask = np.zeros((ph, pw), dtype=np.float32)
+                soft_mask[by0:by0+h, bx0:bx0+w] = 1.0
                 ksize = max(3, (feather * 2) + 1)
-                soft_mask = cv2.GaussianBlur(soft_mask, (ksize, ksize), 0)
-                soft_mask = np.clip(soft_mask, 0.0, 1.0)[:, :, np.newaxis]
+                soft_mask = cv2.GaussianBlur(soft_mask, (ksize, ksize), 0)[:, :, np.newaxis]
                 
-                result = (inpainted.astype(np.float32) * soft_mask + 
-                          result.astype(np.float32) * (1.0 - soft_mask)).astype(np.uint8)
+                result[y0:y1, x0:x1] = (inpainted_patch.astype(np.float32) * soft_mask + 
+                                       sub_patch.astype(np.float32) * (1.0 - soft_mask)).astype(np.uint8)
             else:
-                result = inpainted
+                result[y0:y1, x0:x1] = inpainted_patch
 
         elif method == "blur":
-            # Smart Gaussian blur with soft feathered border
             patch = result[y:y+h, x:x+w]
-            # Kernel size proportional to patch size
             kw = max(15, (w // 6) | 1)
             kh = max(15, (h // 6) | 1)
             blurred_patch = cv2.GaussianBlur(patch, (kw, kh), 0)
 
             if feather > 0:
-                # Alpha mask with feathered borders
                 mask_2d = np.ones((h, w), dtype=np.float32)
                 ksize = max(3, (feather * 2) + 1)
                 mask_2d = cv2.GaussianBlur(mask_2d, (ksize, ksize), 0)
@@ -253,11 +263,10 @@ class VideoProcessor:
                 result[y:y+h, x:x+w] = blurred_patch
 
         elif method == "delogo":
-            # Delogo style interpolation: interpolate patch from surrounding edge pixels
-            # Telea with wider radius produces the closest match to ffmpeg delogo in memory
-            mask = np.zeros((H, W), dtype=np.uint8)
-            mask[y:y+h, x:x+w] = 255
-            result = cv2.inpaint(result, mask, inpaintRadius=max(feather, 4), flags=cv2.INPAINT_TELEA)
+            local_mask = np.zeros((ph, pw), dtype=np.uint8)
+            local_mask[by0:by0+h, bx0:bx0+w] = 255
+            inpainted_patch = cv2.inpaint(sub_patch, local_mask, inpaintRadius=max(feather, 4), flags=cv2.INPAINT_TELEA)
+            result[y0:y1, x0:x1] = inpainted_patch
 
         return result
 
@@ -356,9 +365,11 @@ class VideoProcessor:
             "-i", video_path,
             "-vf", delogo_filter,
             "-c:v", "libx264",
-            "-crf", "17",               # Visually lossless HD quality
-            "-preset", "medium",
+            "-crf", "18",               # Visually lossless HD quality
+            "-preset", "veryfast",       # Ultra-fast parallel encoding
+            "-threads", "0",            # Use all available CPU cores
             "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",   # Fast playback and download streaming
         ]
 
         if info.get("has_audio"):
@@ -455,9 +466,11 @@ class VideoProcessor:
 
         write_cmd.extend([
             "-c:v", "libx264",
-            "-crf", "17",            # Visually lossless HD quality
-            "-preset", "medium",
+            "-crf", "18",            # Visually lossless HD quality
+            "-preset", "veryfast",   # Ultra-fast parallel encoding
+            "-threads", "0",         # All CPU cores
             "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart", # Fast streaming & instant download playback
             output_path
         ])
 
@@ -467,7 +480,7 @@ class VideoProcessor:
         radius = max(3, min(feather, 7))
         flags = cv2.INPAINT_TELEA if method == "telea" else cv2.INPAINT_NS
 
-        # Parse box coordinates and timeline ranges
+        # Parse box coordinates, timeline ranges, and precalculate ROI sub-patch masks
         parsed_boxes = []
         for b in boxes:
             bx = max(0, min(int(b.get("x", 0)), W - 1))
@@ -476,9 +489,40 @@ class VideoProcessor:
             bh = max(1, min(max(1, int(b.get("h", 10))), H - by))
             st = float(b["start_time"]) if b.get("start_time") is not None else None
             et = float(b["end_time"]) if b.get("end_time") is not None else None
+
+            # Sub-patch ROI bounds with padding
+            pad = max(16, feather * 2 + 8)
+            x0 = max(0, bx - pad)
+            y0 = max(0, by - pad)
+            x1 = min(W, bx + bw + pad)
+            y1 = min(H, by + bh + pad)
+            pw = x1 - x0
+            ph = y1 - y0
+
+            local_mask = np.zeros((ph, pw), dtype=np.uint8)
+            local_mask[by - y0 : by - y0 + bh, bx - x0 : bx - x0 + bw] = 255
+
+            if feather > 0:
+                soft_mask = np.zeros((ph, pw), dtype=np.float32)
+                soft_mask[by - y0 : by - y0 + bh, bx - x0 : bx - x0 + bw] = 1.0
+                ksize = max(3, (feather * 2) + 1)
+                soft_mask = cv2.GaussianBlur(soft_mask, (ksize, ksize), 0)[:, :, np.newaxis]
+                inv_soft = 1.0 - soft_mask
+            else:
+                soft_mask = None
+                inv_soft = None
+
+            kw = max(15, (bw // 6) | 1)
+            kh = max(15, (bh // 6) | 1)
+
             parsed_boxes.append({
                 "x": bx, "y": by, "w": bw, "h": bh,
-                "st": st, "et": et
+                "st": st, "et": et,
+                "x0": x0, "y0": y0, "x1": x1, "y1": y1,
+                "mask": local_mask,
+                "soft": soft_mask,
+                "inv_soft": inv_soft,
+                "kw": kw, "kh": kh
             })
 
         frame_count = 0
@@ -488,7 +532,7 @@ class VideoProcessor:
                 if not raw_frame or len(raw_frame) < frame_size:
                     break
 
-                frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((H, W, 3))
+                frame = np.frombuffer(raw_frame, dtype=np.uint8).copy().reshape((H, W, 3))
                 cur_time = frame_count / fps
 
                 # Find active boxes at this timestamp
@@ -501,32 +545,30 @@ class VideoProcessor:
                         active.append(b)
 
                 if active:
-                    if method in ("telea", "ns"):
-                        mask = np.zeros((H, W), dtype=np.uint8)
-                        for b in active:
-                            mask[b["y"]:b["y"]+b["h"], b["x"]:b["x"]+b["w"]] = 255
-
-                        inpainted = cv2.inpaint(frame, mask, inpaintRadius=radius, flags=flags)
-                        if feather > 0:
-                            soft_mask = cv2.GaussianBlur(mask.astype(np.float32) / 255.0, (feather * 2 + 1, feather * 2 + 1), 0)[:, :, np.newaxis]
-                            frame = (inpainted.astype(np.float32) * soft_mask + 
-                                     frame.astype(np.float32) * (1.0 - soft_mask)).astype(np.uint8)
-                        else:
-                            frame = inpainted
-                    elif method == "blur":
-                        for b in active:
+                    for b in active:
+                        x0, y0, x1, y1 = b["x0"], b["y0"], b["x1"], b["y1"]
+                        sub_img = frame[y0:y1, x0:x1]
+                        if method in ("telea", "ns"):
+                            sub_inp = cv2.inpaint(sub_img, b["mask"], inpaintRadius=radius, flags=flags)
+                            if b["soft"] is not None:
+                                frame[y0:y1, x0:x1] = (sub_inp.astype(np.float32) * b["soft"] + 
+                                                       sub_img.astype(np.float32) * b["inv_soft"]).astype(np.uint8)
+                            else:
+                                frame[y0:y1, x0:x1] = sub_inp
+                        elif method == "blur":
                             bx, by, bw, bh = b["x"], b["y"], b["w"], b["h"]
                             patch = frame[by:by+bh, bx:bx+bw]
-                            kw = max(15, (bw // 6) | 1)
-                            kh = max(15, (bh // 6) | 1)
-                            blurred = cv2.GaussianBlur(patch, (kw, kh), 0)
-                            if feather > 0:
+                            blurred = cv2.GaussianBlur(patch, (b["kw"], b["kh"]), 0)
+                            if b["soft"] is not None:
                                 m = np.ones((bh, bw), dtype=np.float32)
                                 ksize = max(3, (feather * 2) + 1)
                                 m = cv2.GaussianBlur(m, (ksize, ksize), 0)[:, :, np.newaxis]
                                 frame[by:by+bh, bx:bx+bw] = (blurred.astype(np.float32) * m + patch.astype(np.float32) * (1.0 - m)).astype(np.uint8)
                             else:
                                 frame[by:by+bh, bx:bx+bw] = blurred
+                        else:  # fallback delogo
+                            sub_inp = cv2.inpaint(sub_img, b["mask"], inpaintRadius=max(feather, 4), flags=cv2.INPAINT_TELEA)
+                            frame[y0:y1, x0:x1] = sub_inp
 
                 writer.stdin.write(frame.tobytes())
                 frame_count += 1
