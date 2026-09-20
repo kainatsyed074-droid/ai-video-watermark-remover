@@ -241,7 +241,7 @@ def run_processing_task(task_id: str, video_id: str, boxes: list, method: str, f
 
     TASKS[task_id]["status"] = "processing"
     TASKS[task_id]["progress"] = 0.0
-    TASKS[task_id]["message"] = "Initializing HD video processing..."
+    TASKS[task_id]["message"] = "Removing watermark..."
 
     def progress_callback(pct, msg):
         TASKS[task_id]["progress"] = pct

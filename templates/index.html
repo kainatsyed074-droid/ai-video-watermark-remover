@@ -286,19 +286,19 @@
 
             <!-- Action Buttons -->
             <div class="action-buttons">
-              <button class="btn btn-autoremove w-100" id="btnQuickAutoExport">
+              <button class="btn btn-autoremove w-100" id="btnProcessVideo">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-svg"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                ⚡ 1-Click Auto Remove & Download HD Video
+                ⚡ Remove Watermark & Download Video
               </button>
-              <p class="quick-hint">Auto-scans all 4 corners (Gemini / Dola AI), removes watermark & downloads clean video</p>
+              <p class="quick-hint">Exports in 100% same original resolution without quality loss • Auto-downloads upon completion</p>
               <div class="secondary-btn-row">
                 <button class="btn btn-secondary flex-1" id="btnPreviewFrame">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-svg"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                   Preview Frame
                 </button>
-                <button class="btn btn-primary-lg flex-1" id="btnProcessVideo">
+                <button class="btn btn-secondary flex-1" id="btnQuickAutoExport" title="Auto-detect Gemini / Dola AI corner and remove watermark">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-svg"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                  Export Clean HD
+                  🤖 Auto-Detect AI
                 </button>
               </div>
             </div>
@@ -310,7 +310,7 @@
       <section class="card progress-card" id="progressSection" style="display: none;">
         <div class="progress-box">
           <h3 id="progressTitle">Removing Watermark...</h3>
-          <p id="progressMessage" class="progress-msg">Encoding in original HD resolution...</p>
+          <p id="progressMessage" class="progress-msg">Removing watermark from selected area...</p>
           
           <div class="progress-bar-container">
             <div class="progress-bar-fill" id="progressBarFill" style="width: 0%;"></div>
@@ -323,7 +323,7 @@
           <!-- Video Result and Download Area (shows when done) -->
           <div class="result-area" id="resultArea" style="display: none;">
             <div class="success-banner">
-              🎉 Watermark successfully removed in full HD!
+              🎉 Watermark successfully removed in full original resolution!
             </div>
             <div class="result-video-wrapper">
               <video id="resultVideo" controls playsinline></video>
@@ -331,7 +331,7 @@
             <div class="result-actions">
               <a id="btnDownload" class="btn btn-success-lg" href="#" download>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-svg"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Download Clean HD Video
+                Download Clean Video
               </a>
               <button class="btn btn-outline" id="btnResetAll">Process Another Video</button>
             </div>

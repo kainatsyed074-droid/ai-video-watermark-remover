@@ -402,7 +402,7 @@ class VideoProcessor:
                     hours, mins, secs = match.groups()
                     current_time = int(hours) * 3600 + int(mins) * 60 + float(secs)
                     pct = min(99.0, max(0.0, (current_time / total_duration) * 100.0))
-                    progress_callback(pct, f"Processing HD Video... {pct:.1f}%")
+                    progress_callback(pct, f"Removing watermark... {pct:.0f}%")
 
         if process.returncode != 0:
             remaining = process.stderr.read()
@@ -575,7 +575,7 @@ class VideoProcessor:
 
                 if progress_callback and frame_count % 15 == 0:
                     pct = min(99.0, max(0.0, (frame_count / total_frames) * 100.0))
-                    progress_callback(pct, f"Processed {frame_count}/{total_frames} frames ({pct:.1f}%)")
+                    progress_callback(pct, f"Removing watermark... {pct:.0f}%")
 
         finally:
             if reader.stdout:
@@ -653,7 +653,7 @@ class VideoProcessor:
 
                 if progress_callback and frame_count % 10 == 0:
                     pct = min(99.0, max(0.0, (frame_count / total_frames) * 100.0))
-                    progress_callback(pct, f"Processing frames... {pct:.1f}%")
+                    progress_callback(pct, f"Removing watermark... {pct:.0f}%")
         finally:
             cap.release()
             writer.release()
@@ -702,7 +702,7 @@ class VideoProcessor:
         # Tier 2: FFmpeg Pipe with OpenCV inpainting & audio copy
         try:
             if progress_callback:
-                progress_callback(12.0, "Processing with AI inpainting...")
+                progress_callback(12.0, "Removing watermark...")
             self.process_video_cv2_pipe(
                 video_path=video_path,
                 boxes=boxes,
@@ -717,7 +717,7 @@ class VideoProcessor:
 
         # Tier 3: Pure OpenCV processing (Zero external binaries required)
         if progress_callback:
-            progress_callback(20.0, "Processing with pure OpenCV engine...")
+            progress_callback(20.0, "Removing watermark...")
         self.process_video_pure_cv2(
             video_path=video_path,
             boxes=boxes,

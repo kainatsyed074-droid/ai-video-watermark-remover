@@ -210,7 +210,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Populate meta info
       metaFilename.textContent = data.filename;
-      metaResolution.textContent = `${videoInfo.width} × ${videoInfo.height} (${getResolutionTag(videoInfo.width, videoInfo.height)})`;
+      metaResolution.textContent = `${videoInfo.width} × ${videoInfo.height} (${getResolutionTag(videoInfo.width, videoInfo.height)} • Original Resolution Preserved)`;
       metaFps.textContent = `${videoInfo.fps} fps`;
       metaDuration.textContent = formatDuration(videoInfo.duration);
 
@@ -1035,6 +1035,8 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    autoTriggerDownload = true;
+
     const algorithm = document.querySelector('input[name="algorithm"]:checked').value;
     const feather = parseInt(featherSlider.value) || 5;
 
@@ -1051,11 +1053,11 @@ document.addEventListener("DOMContentLoaded", () => {
     progressSection.style.display = "block";
     progressSection.scrollIntoView({ behavior: "smooth" });
 
-    progressTitle.textContent = `Removing ${boxes.length} Watermark${boxes.length > 1 ? 's' : ''}...`;
-    progressMessage.textContent = "Processing HD video frames...";
+    progressTitle.textContent = `Removing Watermark...`;
+    progressMessage.textContent = "Removing watermark from selected area...";
     progressBarFill.style.width = "0%";
     progressPercentage.textContent = "0%";
-    progressEta.textContent = "Starting...";
+    progressEta.textContent = "Processing...";
     resultArea.style.display = "none";
     if (errorArea) errorArea.style.display = "none";
 
@@ -1100,11 +1102,11 @@ document.addEventListener("DOMContentLoaded", () => {
         const pct = Math.round(task.progress || 0);
         progressBarFill.style.width = `${pct}%`;
         progressPercentage.textContent = `${pct}%`;
-        progressMessage.textContent = task.message || "Processing...";
+        progressMessage.textContent = task.message || "Removing watermark...";
 
         if (task.status === "completed") {
           clearInterval(progressPollInterval);
-          progressTitle.textContent = "Process Completed!";
+          progressTitle.textContent = "Watermark Removed Successfully!";
           progressEta.textContent = "Ready for download";
           progressBarFill.style.width = "100%";
           progressPercentage.textContent = "100%";
@@ -1115,7 +1117,7 @@ document.addEventListener("DOMContentLoaded", () => {
           resultArea.style.display = "block";
           if (errorArea) errorArea.style.display = "none";
 
-          // Automatic instant download if user clicked Auto-Detect or 1-Click
+          // Automatic instant download
           if (autoTriggerDownload) {
             autoTriggerDownload = false;
             setTimeout(() => {
