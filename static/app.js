@@ -34,6 +34,10 @@ document.addEventListener("DOMContentLoaded", () => {
   // Multi-box management elements
   const boxCountBadge = document.getElementById("boxCountBadge");
   const btnAddBox = document.getElementById("btnAddBox");
+  const btnAutoDetect = document.getElementById("btnAutoDetect");
+  const btnQuickAutoExport = document.getElementById("btnQuickAutoExport");
+  const detectAlert = document.getElementById("detectAlert");
+  const detectAlertText = document.getElementById("detectAlertText");
   const boxListContainer = document.getElementById("boxListContainer");
   const activeBoxTitle = document.getElementById("activeBoxTitle");
   const presetSelect = document.getElementById("presetSelect");
@@ -228,7 +232,24 @@ document.addEventListener("DOMContentLoaded", () => {
           setupCanvas();
           boxes = [];
           nextBoxNum = 1;
-          createWatermarkBox("gemini_bottom_right", "Watermark 1");
+          if (data.detected_boxes && data.detected_boxes.length > 0) {
+            data.detected_boxes.forEach((det, idx) => {
+              const b = createWatermarkBox(null, det.label || `Auto Watermark ${idx + 1}`);
+              b.x = det.x;
+              b.y = det.y;
+              b.w = det.w;
+              b.h = det.h;
+              b.startTime = det.start_time !== null ? det.start_time : 0.0;
+              b.endTime = det.end_time !== null ? det.end_time : Math.round(videoInfo ? videoInfo.duration || 5.0 : 5.0);
+              b.fullVideo = (det.start_time === null && det.end_time === null);
+            });
+            renderBoxList();
+            syncActiveBoxControls();
+            drawOverlay();
+            showDetectAlert(data.detected_boxes[0].label || "Gemini / Dola AI Watermark");
+          } else {
+            createWatermarkBox("gemini_bottom_right", "Watermark 1");
+          }
         }, 80);
       }
 
@@ -920,6 +941,90 @@ document.addEventListener("DOMContentLoaded", () => {
   btnClosePreview.addEventListener("click", () => {
     previewBox.style.display = "none";
   });
+
+  // -----------------------------------------------------
+  // Auto-Detect AI Watermark (Gemini / Dola AI)
+  // -----------------------------------------------------
+  function showDetectAlert(msg) {
+    if (detectAlert && detectAlertText) {
+      detectAlertText.textContent = `✨ ${msg} automatically detected & selected!`;
+      detectAlert.style.display = "flex";
+      setTimeout(() => {
+        if (detectAlert) detectAlert.style.display = "none";
+      }, 7000);
+    }
+  }
+
+  async function performAutoDetect(autoExportAfter = false) {
+    if (!currentVideoId || !videoInfo) {
+      alert("Please upload a video first.");
+      return;
+    }
+
+    if (btnAutoDetect) {
+      btnAutoDetect.disabled = true;
+      btnAutoDetect.innerHTML = "⏳ Detecting...";
+    }
+
+    try {
+      const res = await fetch("/api/auto_detect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ video_id: currentVideoId })
+      });
+      const data = await res.json();
+      if (data.status === "success" && data.boxes && data.boxes.length > 0) {
+        boxes = [];
+        nextBoxNum = 1;
+        data.boxes.forEach((det, idx) => {
+          const b = createWatermarkBox(null, det.label || `Auto Watermark ${idx + 1}`);
+          b.x = det.x;
+          b.y = det.y;
+          b.w = det.w;
+          b.h = det.h;
+          b.startTime = det.start_time !== null ? det.start_time : 0.0;
+          b.endTime = det.end_time !== null ? det.end_time : Math.round(videoInfo ? videoInfo.duration || 5.0 : 5.0);
+          b.fullVideo = (det.start_time === null && det.end_time === null);
+        });
+        renderBoxList();
+        syncActiveBoxControls();
+        drawOverlay();
+        showDetectAlert(data.boxes[0].label || "Gemini / Dola AI Watermark");
+
+        if (autoExportAfter) {
+          btnProcessVideo.click();
+        }
+      } else {
+        alert("No specific watermark detected automatically. You can manually drag on the video to select the watermark area.");
+      }
+    } catch (err) {
+      console.error("Auto detect failed:", err);
+      alert("Auto-detection error: " + err.message);
+    } finally {
+      if (btnAutoDetect) {
+        btnAutoDetect.disabled = false;
+        btnAutoDetect.innerHTML = "🤖 Auto-Detect AI";
+      }
+    }
+  }
+
+  if (btnAutoDetect) {
+    btnAutoDetect.addEventListener("click", () => performAutoDetect(false));
+  }
+
+  if (btnQuickAutoExport) {
+    btnQuickAutoExport.addEventListener("click", () => {
+      if (!currentVideoId) {
+        alert("Please upload a video first.");
+        return;
+      }
+      if (boxes.length === 0) {
+        performAutoDetect(true);
+      } else {
+        btnProcessVideo.click();
+      }
+    });
+  }
 
   // -----------------------------------------------------
   // Process Full Video & Export HD

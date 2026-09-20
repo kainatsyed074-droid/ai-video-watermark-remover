@@ -20,15 +20,16 @@
             <circle cx="12" cy="12" r="3"/>
           </svg>
         </div>
-        <div>
-          <h1>AI Video Watermark Remover</h1>
-          <p class="subtitle">Remove watermarks from Gemini, Dola AI, Runway & any video in 100% original HD resolution</p>
+        <div class="header-titles">
+          <h1 class="brand-title">AI Video Watermark Remover</h1>
+          <p class="subtitle">Auto-Detect & Remove Watermarks from Gemini, Dola AI & Any Video in Lossless HD</p>
         </div>
       </div>
       <div class="badge-group">
+        <span class="badge badge-theme">🤖 Auto-Detect AI</span>
         <span class="badge badge-success">✓ Lossless HD</span>
         <span class="badge badge-info">✓ Audio Preserved</span>
-        <span class="badge badge-primary">✓ AI Inpaint</span>
+        <span class="badge badge-primary">⚡ Ultra-Fast Export</span>
       </div>
     </header>
 
@@ -140,9 +141,18 @@
                   <span>Watermark Zones</span>
                   <span id="boxCountBadge" class="badge badge-primary ml-2">1 Area</span>
                 </label>
-                <button class="btn btn-outline-sm btn-accent" id="btnAddBox" title="Add another watermark zone">
-                  ➕ Add Area
-                </button>
+                <div class="header-action-btns">
+                  <button class="btn btn-outline-sm btn-theme" id="btnAutoDetect" title="Auto-detect Gemini / Dola AI watermark">
+                    🤖 Auto-Detect AI
+                  </button>
+                  <button class="btn btn-outline-sm btn-accent" id="btnAddBox" title="Add another watermark zone">
+                    ➕ Add Area
+                  </button>
+                </div>
+              </div>
+              <div id="detectAlert" class="detect-alert" style="display: none;">
+                <span class="detect-pulse"></span>
+                <span id="detectAlertText">✨ Gemini AI Watermark detected!</span>
               </div>
               <p class="help-text">Select multiple watermarks in different positions or times in the video.</p>
               
@@ -276,14 +286,20 @@
 
             <!-- Action Buttons -->
             <div class="action-buttons">
-              <button class="btn btn-secondary w-100" id="btnPreviewFrame">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-svg"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                Preview Current Frame
-              </button>
-              <button class="btn btn-primary-lg w-100" id="btnProcessVideo">
+              <button class="btn btn-autoremove w-100" id="btnQuickAutoExport">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-svg"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                Remove Watermark & Export HD Video
+                ⚡ 1-Click Auto Remove & Fast Export
               </button>
+              <div class="secondary-btn-row">
+                <button class="btn btn-secondary flex-1" id="btnPreviewFrame">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-svg"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  Preview Frame
+                </button>
+                <button class="btn btn-primary-lg flex-1" id="btnProcessVideo">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-svg"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  Export Clean HD
+                </button>
+              </div>
             </div>
           </div>
         </div>

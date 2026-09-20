@@ -9,6 +9,7 @@ from werkzeug.utils import secure_filename
 
 from core.video_processor import VideoProcessor
 from core.presets import PRESETS, get_preset_coordinates
+from core.detector import WatermarkDetector
 
 import tempfile
 
@@ -44,6 +45,7 @@ for directory in (UPLOAD_DIR, PREVIEW_DIR, OUTPUT_DIR):
     directory.mkdir(parents=True, exist_ok=True)
 
 processor = VideoProcessor()
+detector = WatermarkDetector(ffmpeg_path=processor.ffmpeg_path)
 
 
 @app.errorhandler(500)
@@ -131,12 +133,20 @@ def upload_video():
         has_frame = os.path.exists(first_frame_path)
         frame_url = f"/previews/{os.path.basename(first_frame_path)}" if has_frame else ""
 
+        # Automatic AI watermark detection (Gemini, Dola AI, etc.)
+        detected_boxes = []
+        try:
+            detected_boxes = detector.detect_watermarks(video_path, width=info.get("width", 0), height=info.get("height", 0))
+        except Exception:
+            pass
+
         VIDEOS[video_id] = {
             "id": video_id,
             "original_filename": file.filename,
             "path": video_path,
             "info": info,
-            "first_frame": frame_url
+            "first_frame": frame_url,
+            "detected_boxes": detected_boxes
         }
 
         return jsonify({
@@ -145,10 +155,35 @@ def upload_video():
             "filename": file.filename,
             "info": info,
             "preview_frame": frame_url,
-            "video_url": display_video_url
+            "video_url": display_video_url,
+            "detected_boxes": detected_boxes
         })
     except Exception as exc:
         return jsonify({"error": f"Upload failed: {str(exc)}"}), 500
+
+
+@app.route("/api/auto_detect", methods=["POST"])
+def auto_detect_watermarks():
+    data = request.json or {}
+    video_id = data.get("video_id")
+    if not video_id or video_id not in VIDEOS:
+        return jsonify({"error": "Invalid video_id"}), 404
+
+    video_info = VIDEOS[video_id]
+    video_path = video_info["path"]
+    info = video_info.get("info", {})
+    w = info.get("width", 0)
+    h = info.get("height", 0)
+
+    try:
+        boxes = detector.detect_watermarks(video_path, width=w, height=h)
+        return jsonify({
+            "status": "success",
+            "detected": len(boxes) > 0,
+            "boxes": boxes
+        })
+    except Exception as e:
+        return jsonify({"error": f"Auto-detection failed: {str(e)}"}), 500
 
 
 
