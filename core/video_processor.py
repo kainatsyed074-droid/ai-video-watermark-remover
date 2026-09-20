@@ -4,6 +4,7 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 import cv2
 import numpy as np
 from pathlib import Path
@@ -17,6 +18,7 @@ def get_binary_paths():
     1. Local bin/ folder
     2. System PATH
     3. Common Windows locations (WinGet, LocalAppData, Program Files)
+    4. imageio_ffmpeg bundled static binary (with Linux /tmp executable setup)
     """
     base_dir = Path(__file__).resolve().parent.parent
     local_bin = base_dir / "bin"
@@ -62,7 +64,17 @@ def get_binary_paths():
             import imageio_ffmpeg
             imgio_exe = imageio_ffmpeg.get_ffmpeg_exe()
             if imgio_exe and os.path.exists(imgio_exe):
-                found_ffmpeg = imgio_exe
+                if sys.platform != "win32":
+                    tmp_ffmpeg = "/tmp/ffmpeg"
+                    if not os.path.exists(tmp_ffmpeg) or os.path.getsize(tmp_ffmpeg) != os.path.getsize(imgio_exe):
+                        shutil.copyfile(imgio_exe, tmp_ffmpeg)
+                    try:
+                        os.chmod(tmp_ffmpeg, 0o755)
+                    except Exception:
+                        pass
+                    found_ffmpeg = tmp_ffmpeg
+                else:
+                    found_ffmpeg = imgio_exe
         except Exception:
             pass
 
@@ -231,8 +243,15 @@ class VideoProcessor:
             local_mask = np.zeros((ph, pw), dtype=np.uint8)
             local_mask[by0:by0+h, bx0:bx0+w] = 255
             
-            radius = max(3, min(feather, 7))
-            inpainted_patch = cv2.inpaint(sub_patch, local_mask, inpaintRadius=radius, flags=flags)
+            radius = max(2, min(feather, 5))
+            downsample = max(1, min(pw, ph) // 50)
+            if downsample > 1:
+                small_sub = cv2.resize(sub_patch, (pw // downsample, ph // downsample), interpolation=cv2.INTER_LINEAR)
+                small_mask = cv2.resize(local_mask, (pw // downsample, ph // downsample), interpolation=cv2.INTER_NEAREST)
+                small_inp = cv2.inpaint(small_sub, small_mask, inpaintRadius=radius, flags=flags)
+                inpainted_patch = cv2.resize(small_inp, (pw, ph), interpolation=cv2.INTER_LINEAR)
+            else:
+                inpainted_patch = cv2.inpaint(sub_patch, local_mask, inpaintRadius=radius, flags=flags)
             
             # Feathered alpha blend around the border of the sub-patch
             if feather > 0:
@@ -361,15 +380,16 @@ class VideoProcessor:
 
         cmd = [
             self.ffmpeg_path,
+            "-nostats",
             "-y",
             "-i", video_path,
             "-vf", delogo_filter,
             "-c:v", "libx264",
-            "-crf", "18",               # Visually lossless HD quality
-            "-preset", "veryfast",       # Ultra-fast parallel encoding
-            "-threads", "0",            # Use all available CPU cores
+            "-crf", "20",                # Visually lossless HD quality
+            "-preset", "ultrafast",       # Maximum speed multi-threaded encoding
+            "-threads", "0",             # Use all available CPU cores
             "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",   # Fast playback and download streaming
+            "-movflags", "+faststart",    # Fast streaming playback
         ]
 
         if info.get("has_audio"):
@@ -377,39 +397,56 @@ class VideoProcessor:
         else:
             cmd.extend(["-an"])
 
-        cmd.append(output_path)
+        cmd.extend(["-progress", "pipe:1", output_path])
 
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            universal_newlines=True,
-            bufsize=1
-        )
+        if progress_callback:
+            progress_callback(5.0, "Removing watermark... 5%")
 
-        time_pattern = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")
-        all_stderr = []
+        with tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as err_file:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=err_file,
+                text=True,
+                bufsize=1
+            )
 
-        while True:
-            line = process.stderr.readline()
-            if not line and process.poll() is not None:
-                break
-            if line:
-                all_stderr.append(line)
-                match = time_pattern.search(line)
-                if match and progress_callback:
-                    hours, mins, secs = match.groups()
-                    current_time = int(hours) * 3600 + int(mins) * 60 + float(secs)
-                    pct = min(99.0, max(0.0, (current_time / total_duration) * 100.0))
-                    progress_callback(pct, f"Removing watermark... {pct:.0f}%")
+            last_pct = 5.0
+            if process.stdout:
+                for line in process.stdout:
+                    line = line.strip()
+                    if line.startswith("out_time_us="):
+                        try:
+                            val = int(line.split("=", 1)[1])
+                            cur_sec = val / 1_000_000.0
+                            if total_duration > 0 and progress_callback:
+                                pct = min(98.0, max(5.0, (cur_sec / total_duration) * 100.0))
+                                if pct - last_pct >= 2.0 or pct >= 98.0:
+                                    last_pct = pct
+                                    progress_callback(pct, f"Removing watermark... {pct:.0f}%")
+                        except Exception:
+                            pass
+                    elif line.startswith("out_time_ms="):
+                        try:
+                            val = int(line.split("=", 1)[1])
+                            cur_sec = val / 1_000_000.0
+                            if total_duration > 0 and progress_callback:
+                                pct = min(98.0, max(5.0, (cur_sec / total_duration) * 100.0))
+                                if pct - last_pct >= 2.0 or pct >= 98.0:
+                                    last_pct = pct
+                                    progress_callback(pct, f"Removing watermark... {pct:.0f}%")
+                        except Exception:
+                            pass
+                    elif line == "progress=end":
+                        if progress_callback:
+                            progress_callback(99.0, "Removing watermark... 99%")
 
-        if process.returncode != 0:
-            remaining = process.stderr.read()
-            if remaining:
-                all_stderr.append(remaining)
-            err = "".join(all_stderr[-15:])
-            raise RuntimeError(f"FFmpeg delogo failed (code {process.returncode}): {err}")
+            process.wait()
+
+            if process.returncode != 0:
+                err_file.seek(0)
+                err_msg = err_file.read()
+                raise RuntimeError(f"FFmpeg delogo failed (code {process.returncode}): {err_msg[-300:]}")
 
         if progress_callback:
             progress_callback(100.0, "Completed!")
@@ -466,8 +503,8 @@ class VideoProcessor:
 
         write_cmd.extend([
             "-c:v", "libx264",
-            "-crf", "18",            # Visually lossless HD quality
-            "-preset", "veryfast",   # Ultra-fast parallel encoding
+            "-crf", "20",            # Visually lossless HD quality
+            "-preset", "ultrafast",   # Ultra-fast parallel encoding
             "-threads", "0",         # All CPU cores
             "-pix_fmt", "yuv420p",
             "-movflags", "+faststart", # Fast streaming & instant download playback
@@ -573,8 +610,8 @@ class VideoProcessor:
                 writer.stdin.write(frame.tobytes())
                 frame_count += 1
 
-                if progress_callback and frame_count % 15 == 0:
-                    pct = min(99.0, max(0.0, (frame_count / total_frames) * 100.0))
+                if progress_callback and (frame_count % 3 == 0 or frame_count == total_frames):
+                    pct = min(99.0, max(5.0, (frame_count / total_frames) * 100.0))
                     progress_callback(pct, f"Removing watermark... {pct:.0f}%")
 
         finally:
@@ -651,8 +688,8 @@ class VideoProcessor:
                 writer.write(frame)
                 frame_count += 1
 
-                if progress_callback and frame_count % 10 == 0:
-                    pct = min(99.0, max(0.0, (frame_count / total_frames) * 100.0))
+                if progress_callback and (frame_count % 3 == 0 or frame_count == total_frames):
+                    pct = min(99.0, max(5.0, (frame_count / total_frames) * 100.0))
                     progress_callback(pct, f"Removing watermark... {pct:.0f}%")
         finally:
             cap.release()

@@ -1037,7 +1037,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     autoTriggerDownload = true;
 
-    const algorithm = document.querySelector('input[name="algorithm"]:checked').value;
+    const algoEl = document.querySelector('input[name="algorithm"]:checked');
+    const algorithm = (algoEl && algoEl.value) ? algoEl.value : "delogo";
     const feather = parseInt(featherSlider.value) || 5;
 
     const payloadBoxes = boxes.map(b => ({
@@ -1138,7 +1139,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch (e) {
         console.error("Poll error:", e);
       }
-    }, 800);
+    }, 350);
   }
 
   if (btnBackToEditor) {
