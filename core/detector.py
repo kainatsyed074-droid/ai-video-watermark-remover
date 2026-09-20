@@ -1,6 +1,7 @@
 """
 AI Watermark & Logo Detection Engine for Gemini, Dola AI, and Video Watermarks.
-Uses temporal variance analysis, edge feature density, and AI watermark signatures.
+Scans all 4 corners (Bottom-Right, Bottom-Left, Top-Right, Top-Left) and Bottom-Center
+using temporal variance analysis, static edge density, and AI watermark signatures.
 """
 
 import os
@@ -14,7 +15,7 @@ class WatermarkDetector:
     def __init__(self, ffmpeg_path: str = "ffmpeg"):
         self.ffmpeg_path = ffmpeg_path
 
-    def sample_video_frames(self, video_path: str, num_samples: int = 5) -> List[np.ndarray]:
+    def sample_video_frames(self, video_path: str, num_samples: int = 6) -> List[np.ndarray]:
         """
         Samples evenly spaced frames across the video for temporal variance analysis.
         """
@@ -27,8 +28,8 @@ class WatermarkDetector:
             cap.release()
             return []
 
-        # Choose frame indices at 15%, 35%, 50%, 70%, 85%
-        percentages = np.linspace(0.15, 0.85, min(num_samples, max(1, total_frames)))
+        # Choose frame indices across duration
+        percentages = np.linspace(0.10, 0.90, min(num_samples, max(1, total_frames)))
         indices = [int(p * total_frames) for p in percentages]
 
         frames = []
@@ -43,12 +44,13 @@ class WatermarkDetector:
 
     def detect_watermarks(self, video_path: str, width: int = 0, height: int = 0) -> List[Dict[str, Any]]:
         """
-        Automatically detects Gemini, Dola AI, or static logo watermarks.
-        Returns a list of detected bounding boxes with confidence and metadata.
+        Scans all 4 video corners and bottom center to automatically identify where
+        Gemini, Dola AI, or other static watermarks/logos appear.
+        Returns the winning bounding box with corner location, label, and confidence.
         """
-        frames = self.sample_video_frames(video_path, num_samples=5)
+        frames = self.sample_video_frames(video_path, num_samples=6)
         
-        # If frames couldn't be sampled from video, fallback using width and height presets
+        # Fallback if video frames could not be read
         if not frames:
             if width > 0 and height > 0:
                 coords = get_preset_coordinates("gemini_bottom_right", width, height)
@@ -58,7 +60,8 @@ class WatermarkDetector:
                         "y": coords["y"],
                         "w": coords["w"],
                         "h": coords["h"],
-                        "label": "Gemini AI Watermark",
+                        "label": "Gemini / Dola AI (Bottom-Right Corner)",
+                        "corner": "bottom_right",
                         "type": "gemini",
                         "confidence": 0.90,
                         "start_time": None,
@@ -72,124 +75,173 @@ class WatermarkDetector:
         if height == 0:
             height = H
 
-        # Convert sample frames to grayscale
+        # Convert frames to grayscale
         grays = [cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) for f in frames]
 
-        # 1. Candidate Regions to investigate:
-        # Zone A: Bottom-Right (Primary Gemini / Dola AI zone)
-        # Zone B: Bottom-Left
-        # Zone C: Top-Right
-        # Zone D: Bottom-Center
+        # Candidate Corner Zones:
+        # 1. Bottom-Right: Standard for Google Gemini, Google Veo, and Dola AI
+        # 2. Bottom-Left: Common for Dola AI, Runway, and watermark variants
+        # 3. Top-Right: Sora, Kling, secondary watermark zone
+        # 4. Top-Left: Brand logos
+        # 5. Bottom-Center: Watermark banner or ticker
         zones = [
             {
-                "name": "bottom_right",
-                "x_range": (int(W * 0.70), W - 5),
-                "y_range": (int(H * 0.82), H - 5),
-                "primary_ai": "gemini",
-                "label": "Gemini / Dola AI Watermark"
+                "id": "bottom_right",
+                "name": "Bottom-Right Corner",
+                "label": "Gemini / Dola AI (Bottom-Right)",
+                "rect": (int(W * 0.65), int(H * 0.75), W - 4, H - 4),
+                "type": "gemini",
+                "preset": "gemini_bottom_right"
             },
             {
-                "name": "bottom_left",
-                "x_range": (5, int(W * 0.30)),
-                "y_range": (int(H * 0.82), H - 5),
-                "primary_ai": "general",
-                "label": "Bottom-Left Watermark"
+                "id": "bottom_left",
+                "name": "Bottom-Left Corner",
+                "label": "Dola AI (Bottom-Left)",
+                "rect": (4, int(H * 0.75), int(W * 0.35), H - 4),
+                "type": "dola",
+                "preset": "bottom_left"
             },
             {
-                "name": "top_right",
-                "x_range": (int(W * 0.70), W - 5),
-                "y_range": (5, int(H * 0.18)),
-                "primary_ai": "general",
-                "label": "Top-Right Watermark"
+                "id": "top_right",
+                "name": "Top-Right Corner",
+                "label": "AI Watermark (Top-Right)",
+                "rect": (int(W * 0.65), 4, W - 4, int(H * 0.25)),
+                "type": "general",
+                "preset": "top_right"
+            },
+            {
+                "id": "top_left",
+                "name": "Top-Left Corner",
+                "label": "AI Watermark (Top-Left)",
+                "rect": (4, 4, int(W * 0.35), int(H * 0.25)),
+                "type": "general",
+                "preset": "top_left"
+            },
+            {
+                "id": "bottom_center",
+                "name": "Bottom-Center",
+                "label": "Watermark (Bottom-Center)",
+                "rect": (int(W * 0.25), int(H * 0.82), int(W * 0.75), H - 4),
+                "type": "general",
+                "preset": "bottom_center"
             }
         ]
 
-        detected_boxes = []
-
-        # If multiple frames exist, compute temporal standard deviation
-        # Static watermarks have very low temporal variance across frames
+        # Compute temporal standard deviation across sampled frames
+        # Pixels with std close to 0 that have edge features are static logos/watermarks
         has_temporal = len(grays) >= 3
         if has_temporal:
             stack = np.stack(grays, axis=0).astype(np.float32)
-            std_map = np.std(stack, axis=0)  # low where watermark is static
-            mean_map = np.mean(stack, axis=0)
+            std_map = np.std(stack, axis=0)
         else:
-            std_map = None
-            mean_map = grays[0]
+            std_map = np.zeros((H, W), dtype=np.float32)
 
-        # Examine Bottom-Right first (standard for Gemini & Dola AI)
-        br_zone = zones[0]
-        zx0, zx1 = br_zone["x_range"]
-        zy0, zy1 = br_zone["y_range"]
-        zone_h = zy1 - zy0
-        zone_w = zx1 - zx0
+        zone_candidates = []
 
-        # Look at edge features in the bottom-right zone
-        zone_edges = []
-        for g in grays:
-            patch = g[zy0:zy1, zx0:zx1]
-            edges = cv2.Canny(patch, 50, 150)
-            zone_edges.append(edges)
+        for z in zones:
+            x0, y0, x1, y1 = z["rect"]
+            zw = x1 - x0
+            zh = y1 - y0
+            if zw <= 10 or zh <= 10:
+                continue
 
-        avg_edges = np.mean(np.stack(zone_edges, axis=0), axis=0).astype(np.uint8)
-        
-        # Dilate edge map slightly to connect letters / star sparkle contours
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-        dilated = cv2.dilate(avg_edges, kernel, iterations=2)
+            # Compute edge maps in this zone across all sampled frames
+            z_edges = [cv2.Canny(g[y0:y1, x0:x1], 40, 140) for g in grays]
+            avg_edge = np.mean(np.stack(z_edges, axis=0), axis=0)
 
-        # Find contours inside the zone
-        contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            # Look for static edges (low temporal variance + high edge density)
+            z_std = std_map[y0:y1, x0:x1]
+            static_mask = (avg_edge > 25) & (z_std < 22)
+            static_score = int(np.sum(static_mask))
 
-        best_box = None
-        max_score = 0.0
+            # Also check for high-contrast text/sparkle overlay
+            # Dilate static mask to connect letters and icons into bounding contours
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+            dilated = cv2.dilate(static_mask.astype(np.uint8), kernel, iterations=2)
+            contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        for cnt in contours:
-            cx, cy, cw, ch = cv2.boundingRect(cnt)
-            # Watermark characteristics:
-            # - Not too small (> 20px wide, > 10px high)
-            # - Not entire zone
-            if cw >= 25 and ch >= 12 and cw < zone_w * 0.95 and ch < zone_h * 0.95:
-                aspect = cw / float(ch)
-                # Gemini & Dola logos typically have aspect ratio between 1.5 and 5.0
-                if 1.2 <= aspect <= 6.0:
-                    # Score based on static stability if temporal std_map is available
-                    if std_map is not None:
-                        sub_std = std_map[zy0 + cy : zy0 + cy + ch, zx0 + cx : zx0 + cx + cw]
-                        # Lower temporal variance = more static = higher watermark likelihood
-                        static_score = float(np.mean(sub_std))
-                        # Invert score so lower variance = higher score
-                        score = (cw * ch) / (static_score + 1.0)
-                    else:
-                        score = cw * ch
+            valid_contours = []
+            for cnt in contours:
+                cx, cy, cw, ch = cv2.boundingRect(cnt)
+                # Filter noise
+                if cw >= 20 and ch >= 12 and (cw * ch) > 250:
+                    aspect = cw / float(ch)
+                    # Logo aspect ratio typical for Gemini / Dola
+                    if 1.0 <= aspect <= 7.0:
+                        valid_contours.append((cx, cy, cw, ch))
 
-                    if score > max_score:
-                        max_score = score
-                        # Add a safety margin around detected contour
-                        pad_x = max(10, int(cw * 0.15))
-                        pad_y = max(8, int(ch * 0.20))
-                        
-                        abs_x = max(0, zx0 + cx - pad_x)
-                        abs_y = max(0, zy0 + cy - pad_y)
-                        abs_w = min(W - abs_x, cw + (pad_x * 2))
-                        abs_h = min(H - abs_y, ch + (pad_y * 2))
+            tight_box = None
+            if valid_contours:
+                # Merge all valid contours in this zone
+                min_x = min(c[0] for c in valid_contours)
+                min_y = min(c[1] for c in valid_contours)
+                max_x = max(c[0] + c[2] for c in valid_contours)
+                max_y = max(c[1] + c[3] for c in valid_contours)
 
-                        best_box = {
-                            "x": abs_x,
-                            "y": abs_y,
-                            "w": abs_w,
-                            "h": abs_h,
-                            "label": "Gemini / Dola AI Watermark",
-                            "type": "gemini",
-                            "confidence": 0.96,
-                            "start_time": None,
-                            "end_time": None
-                        }
+                # Add safety margin around detected logo
+                pad_x = max(12, int((max_x - min_x) * 0.12))
+                pad_y = max(10, int((max_y - min_y) * 0.15))
 
-        # If a distinctive contour was locked in, return it
-        if best_box:
-            detected_boxes.append(best_box)
+                abs_x = max(0, x0 + min_x - pad_x)
+                abs_y = max(0, y0 + min_y - pad_y)
+                abs_w = min(W - abs_x, (max_x - min_x) + (pad_x * 2))
+                abs_h = min(H - abs_y, (max_y - min_y) + (pad_y * 2))
+
+                tight_box = {
+                    "x": abs_x,
+                    "y": abs_y,
+                    "w": abs_w,
+                    "h": abs_h
+                }
+
+            zone_candidates.append({
+                "zone": z,
+                "score": static_score,
+                "tight_box": tight_box
+            })
+
+        # Find the zone with the highest static watermark score
+        zone_candidates.sort(key=lambda item: item["score"], reverse=True)
+        top_candidate = zone_candidates[0]
+
+        detected_boxes = []
+
+        # Threshold: if top score > 80, we have a clear watermark detection!
+        if top_candidate["score"] >= 80 and top_candidate["tight_box"]:
+            z = top_candidate["zone"]
+            tb = top_candidate["tight_box"]
+            detected_boxes.append({
+                "x": tb["x"],
+                "y": tb["y"],
+                "w": tb["w"],
+                "h": tb["h"],
+                "label": z["label"],
+                "corner": z["id"],
+                "type": z["type"],
+                "confidence": 0.98,
+                "start_time": None,
+                "end_time": None
+            })
+        elif top_candidate["score"] >= 80:
+            # High score in zone, use zone preset coordinates
+            z = top_candidate["zone"]
+            preset_coords = get_preset_coordinates(z["preset"], W, H)
+            if preset_coords:
+                detected_boxes.append({
+                    "x": preset_coords["x"],
+                    "y": preset_coords["y"],
+                    "w": preset_coords["w"],
+                    "h": preset_coords["h"],
+                    "label": z["label"],
+                    "corner": z["id"],
+                    "type": z["type"],
+                    "confidence": 0.94,
+                    "start_time": None,
+                    "end_time": None
+                })
         else:
-            # Calibrated fallback for Gemini & Dola AI bottom-right watermark
+            # If no corner had dynamic background variance (e.g. static/solid video),
+            # check the default Gemini / Dola AI bottom-right location with calibrated box
             gemini_coords = get_preset_coordinates("gemini_bottom_right", W, H)
             if gemini_coords:
                 detected_boxes.append({
@@ -197,9 +249,10 @@ class WatermarkDetector:
                     "y": gemini_coords["y"],
                     "w": gemini_coords["w"],
                     "h": gemini_coords["h"],
-                    "label": "Gemini AI Watermark (Bottom-Right)",
+                    "label": "Gemini / Dola AI (Bottom-Right)",
+                    "corner": "bottom_right",
                     "type": "gemini",
-                    "confidence": 0.92,
+                    "confidence": 0.90,
                     "start_time": None,
                     "end_time": None
                 })

@@ -697,6 +697,14 @@ body {
   background: linear-gradient(135deg, #ffffff 0%, #D8EBF2 100%);
 }
 
+.quick-hint {
+  font-size: 0.78rem;
+  color: #a0aec0;
+  text-align: center;
+  margin-top: -4px;
+  margin-bottom: 2px;
+}
+
 .secondary-btn-row {
   display: flex;
   gap: 12px;

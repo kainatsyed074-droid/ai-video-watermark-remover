@@ -97,6 +97,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let boxes = [];
   let activeBoxId = null;
   let nextBoxNum = 1;
+  let autoTriggerDownload = false;
 
   // Pointer Interaction State
   let pointerIsDown = false;
@@ -992,7 +993,10 @@ document.addEventListener("DOMContentLoaded", () => {
         showDetectAlert(data.boxes[0].label || "Gemini / Dola AI Watermark");
 
         if (autoExportAfter) {
-          btnProcessVideo.click();
+          autoTriggerDownload = true;
+          setTimeout(() => {
+            btnProcessVideo.click();
+          }, 350);
         }
       } else {
         alert("No specific watermark detected automatically. You can manually drag on the video to select the watermark area.");
@@ -1003,13 +1007,13 @@ document.addEventListener("DOMContentLoaded", () => {
     } finally {
       if (btnAutoDetect) {
         btnAutoDetect.disabled = false;
-        btnAutoDetect.innerHTML = "🤖 Auto-Detect AI";
+        btnAutoDetect.innerHTML = "🤖 Auto-Detect & Remove";
       }
     }
   }
 
   if (btnAutoDetect) {
-    btnAutoDetect.addEventListener("click", () => performAutoDetect(false));
+    btnAutoDetect.addEventListener("click", () => performAutoDetect(true));
   }
 
   if (btnQuickAutoExport) {
@@ -1018,11 +1022,7 @@ document.addEventListener("DOMContentLoaded", () => {
         alert("Please upload a video first.");
         return;
       }
-      if (boxes.length === 0) {
-        performAutoDetect(true);
-      } else {
-        btnProcessVideo.click();
-      }
+      performAutoDetect(true);
     });
   }
 
@@ -1114,6 +1114,19 @@ document.addEventListener("DOMContentLoaded", () => {
           btnDownload.href = task.download_url;
           resultArea.style.display = "block";
           if (errorArea) errorArea.style.display = "none";
+
+          // Automatic instant download if user clicked Auto-Detect or 1-Click
+          if (autoTriggerDownload) {
+            autoTriggerDownload = false;
+            setTimeout(() => {
+              const tempLink = document.createElement("a");
+              tempLink.href = task.download_url;
+              tempLink.setAttribute("download", "");
+              document.body.appendChild(tempLink);
+              tempLink.click();
+              document.body.removeChild(tempLink);
+            }, 300);
+          }
         } else if (task.status === "error") {
           clearInterval(progressPollInterval);
           progressTitle.textContent = "Processing Failed";
